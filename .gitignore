@@ -1,0 +1,17 @@
+# Environnement Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Sorties MLflow (générées à chaque exécution)
+mlflow.db
+mlruns/
+mlartifacts/
+run.log
+
+# Journaux de plantage de la JVM
+hs_err_pid*.log
+
+# Copie de data/hack_data.csv (le pipeline lit celle de data/)
+/hack_data.csv
