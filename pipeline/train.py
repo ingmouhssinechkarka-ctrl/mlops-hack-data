@@ -4,6 +4,7 @@ import json
 
 import mlflow
 import mlflow.spark
+import pyspark
 from pyspark.ml import Pipeline
 from pyspark.ml.clustering import BisectingKMeans, GaussianMixture, KMeans
 from pyspark.ml.evaluation import ClusteringEvaluator
@@ -50,7 +51,10 @@ def train_and_log(name, k, df, data_info, save_model=True):
 
         if save_model:
             try:
-                mlflow.spark.log_model(model, "model")
+                # Explicit requirements: otherwise MLflow infers them by reloading the
+                # model in a 2nd Python+Spark process, which doubles memory use.
+                mlflow.spark.log_model(model, "model", pip_requirements=[
+                    f"pyspark=={pyspark.__version__}", f"mlflow=={mlflow.__version__}"])
             except Exception as e:  # souvent winutils manquant sous Windows
                 print(f"  (modèle non sauvegardé : {type(e).__name__}. "
                       "Relance avec --no-model si ça bloque)")

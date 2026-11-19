@@ -6,6 +6,7 @@ Question : 2 ou 3 hackers ont-ils attaqué ? Indice : chaque hacker a fait
 Usage : python run_pipeline.py [--data data/hack_data.csv] [--experiment hack-data] [--no-model]
 """
 import argparse
+import os
 
 import mlflow
 from pyspark.sql import SparkSession
@@ -21,16 +22,20 @@ def main():
     parser.add_argument("--experiment", default="hack-data")
     parser.add_argument("--no-model", action="store_true",
                         help="ne sauvegarde pas le modèle Spark dans MLflow")
+    parser.add_argument("--master", default=os.environ.get("SPARK_MASTER", "local[*]"),
+                        help="local[*] (par défaut) ou spark://IP_DU_MASTER:7077 pour un cluster")
     args = parser.parse_args()
 
-    spark = (SparkSession.builder.appName("mlops-hack-data").master("local[*]")
+    spark = (SparkSession.builder.appName("mlops-hack-data").master(args.master)
              .config("spark.sql.shuffle.partitions", "4")      # petit fichier -> peu de partitions
              .config("spark.ui.showConsoleProgress", "false")  # pas de barres de progression
              .getOrCreate())
     spark.sparkContext.setLogLevel("ERROR")
 
     # 1. Ingestion
-    raw = load_csv(spark, args.data)
+    # raw = load_csv(spark, args.data)
+    from pipeline.ingestion import load_data 
+    raw = load_data(spark, args.data)
     n_raw = raw.count()
 
     # 2. Traitement

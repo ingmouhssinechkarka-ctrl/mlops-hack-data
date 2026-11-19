@@ -1,0 +1,126 @@
+# Kafka (KRaft, no ZooKeeper) + HDFS (1 namenode, 1 datanode) + Spark (driver container).
+# Settings come from .env. Start everything:  docker compose up -d
+services:
+
+  kafka:
+    image: ${KAFKA_IMAGE}
+    container_name: kafka
+    ports:
+      - "${KAFKA_EXTERNAL_PORT}:${KAFKA_EXTERNAL_PORT}"   # used by producer.py on your machine
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:${KAFKA_EXTERNAL_PORT}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:${KAFKA_EXTERNAL_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: ${KAFKA_PARTITIONS}
+
+  namenode:
+    image: bde2020/hadoop-namenode:${HADOOP_VERSION_TAG}
+    container_name: namenode
+    ports:
+      - "${HDFS_UI_PORT}:9870"   # HDFpysS web UI
+    environment:
+      CLUSTER_NAME: hack
+      HADOOP_HEAPSIZE_MAX: 256m   # small PC: cap the Java heap (default = 1/4 of RAM)
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      HDFS_CONF_dfs_permissions_enabled: "false"
+      HDFS_CONF_dfs_replication: "1"
+    volumes:
+      - namenode:/hadoop/dfs/name
+
+  datanode:
+    image: bde2020/hadoop-datanode:${HADOOP_VERSION_TAG}
+    container_name: datanode
+    depends_on:
+      - namenode
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+      HADOOP_HEAPSIZE_MAX: 256m
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      HDFS_CONF_dfs_permissions_enabled: "false"
+      HDFS_CONF_dfs_replication: "1"
+    volumes:
+      - datanode:/hadoop/dfs/data
+
+  spark:
+    image: ${SPARK_IMAGE}
+    container_name: spark
+    depends_on:
+      - kafka
+      - namenode
+      - datanode
+    entrypoint: ["sleep", "infinity"]   # stays up; jobs are launched with `docker compose exec`
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC}
+    ports:
+      - "${SPARK_UI_PORT}:4040"  # Spark UI of the running job
+    volumes:
+      - ./spark:/opt/jobs
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${MLFLOW_DB_USER}
+      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD}
+      POSTGRES_DB: mlflow
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
+  minio:
+    image: ${MINIO_IMAGE}
+    container_name: minio
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
+    ports:
+      - "9001:9001"   # MinIO web console
+    volumes:
+      - minio:/data
+
+  mlflow:
+    build: ./mlflow
+    container_name: mlflow
+    restart: unless-stopped
+    depends_on: [postgres, minio]
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_PASSWORD}
+      DB_URI: postgresql+psycopg2://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@postgres:5432/mlflow
+    ports:
+      - "5000:5000"   # MLflow UI
+
+  trainer:
+    build:
+      context: ..          # your MLflow project folder
+      dockerfile: Dockerfile
+    image: hack-data-mlops:v1
+    profiles: ["jobs"]     # not started by "up -d"
+    depends_on: [mlflow, namenode]
+    mem_limit: 1500m       # if it runs out, only this container dies, not all of Docker
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      SPARK_MASTER: local[2]
+      PYSPARK_SUBMIT_ARGS: --driver-memory 768m pyspark-shell
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_PASSWORD}
+    command: python run_pipeline.py --data hdfs://namenode:9000/hack/attacks --experiment hack-data-stream  
+
+volumes:
+  namenode:
+  datanode:
+  postgres:
+  minio:

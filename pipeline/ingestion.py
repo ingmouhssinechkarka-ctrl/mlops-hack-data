@@ -15,3 +15,27 @@ SCHEMA = StructType([
 
 def load_csv(spark: SparkSession, path: str) -> DataFrame:
     return spark.read.csv(path, header=True, schema=SCHEMA)
+from pyspark.sql import functions as F
+
+# Names written by the streaming job (part 1) -> names used by this pipeline
+STREAM_COLUMNS = {
+    "session_connection_time": "Session_Connection_Time",
+    "bytes_transferred": "Bytes Transferred",
+    "kali_trace_used": "Kali_Trace_Used",
+    "servers_corrupted": "Servers_Corrupted",
+    "pages_corrupted": "Pages_Corrupted",
+    "location": "Location",
+    "wpm_typing_speed": "WPM_Typing_Speed",
+}
+
+
+def load_parquet(spark: SparkSession, path: str) -> DataFrame:
+    """Reads the attacks the streaming job stored in HDFS, with the CSV's column names."""
+    df = spark.read.parquet(path)
+    return df.select([F.col(src).cast(SCHEMA[dst].dataType).alias(dst)
+                      for src, dst in STREAM_COLUMNS.items()])
+
+
+def load_data(spark: SparkSession, path: str) -> DataFrame:
+    """A .csv file -> load_csv; anything else (an HDFS folder) -> load_parquet."""
+    return load_csv(spark, path) if path.endswith(".csv") else load_parquet(spark, path)
