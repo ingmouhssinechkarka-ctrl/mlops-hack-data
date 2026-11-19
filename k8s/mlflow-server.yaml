@@ -1,0 +1,71 @@
+# Serveur MLflow : garde les runs (SQLite) et les modèles (artifacts) sur un disque persistant.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mlflow-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # SQLite + disque RWO : un seul pod à la fois
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      securityContext:
+        fsGroup: 1000  # l'utilisateur "app" de l'image peut écrire sur le disque
+      containers:
+        - name: mlflow
+          image: hack-data-mlops:v1
+          imagePullPolicy: IfNotPresent
+          command:
+            - mlflow
+            - server
+            - --host=0.0.0.0
+            - --port=5000
+            - --backend-store-uri=sqlite:////mlflow/mlflow.db
+            - --artifacts-destination=/mlflow/artifacts
+            # "mlflow:5000" = appels du Job dans le cluster ; localhost = kubectl port-forward
+            - --allowed-hosts=mlflow,mlflow:5000,localhost,localhost:5000,127.0.0.1,127.0.0.1:5000
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: data
+              mountPath: /mlflow
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mlflow-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+spec:
+  selector:
+    app: mlflow
+  ports:
+    - port: 5000
+      targetPort: 5000

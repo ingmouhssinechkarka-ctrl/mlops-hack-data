@@ -15,3 +15,16 @@ hs_err_pid*.log
 
 # Copie de data/hack_data.csv (le pipeline lit celle de data/)
 /hack_data.csv
+
+# Secrets: real passwords stay local (copy .env.example to .env)
+.env
+!.env.example
+
+# Local MLflow database backups
+mlflow.db*
+
+# Editor settings
+.vscode/
+
+# Old copy of the project (separate git repo)
+/test3 models mlflow/

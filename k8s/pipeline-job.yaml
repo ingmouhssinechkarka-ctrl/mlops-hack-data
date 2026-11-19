@@ -1,0 +1,38 @@
+# Job : lance le pipeline une fois (6 runs) et envoie tout au serveur MLflow.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hack-data-pipeline
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400  # le Job est supprimé 24 h après la fin
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        # Attend que le serveur MLflow réponde avant de lancer Spark.
+        - name: wait-for-mlflow
+          image: hack-data-mlops:v1
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -c
+            - |
+              import time, urllib.request
+              while True:
+                  try:
+                      urllib.request.urlopen("http://mlflow:5000/health", timeout=3)
+                      break
+                  except Exception:
+                      print("MLflow pas encore prêt..."); time.sleep(3)
+      containers:
+        - name: pipeline
+          image: hack-data-mlops:v1
+          imagePullPolicy: IfNotPresent
+          command: ["python", "run_pipeline.py"]
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: http://mlflow:5000
+          resources:
+            requests: {cpu: "1", memory: 1Gi}
+            limits: {memory: 2Gi}

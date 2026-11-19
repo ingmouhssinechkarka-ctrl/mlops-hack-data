@@ -1,0 +1,20 @@
+.git
+.github
+.venv
+**/__pycache__
+.pytest_cache
+tests
+mlruns
+mlflow-*
+mlflow.db*
+*.log
+*.PNG
+*.png
+hack_data.csv
+lancer.bat
+test3 models mlflow
+k8s
+.venv/
+mlruns/
+streaming-hack-data/
+test3 models mlflow/
