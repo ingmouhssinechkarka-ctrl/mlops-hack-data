@@ -93,8 +93,10 @@ services:
       POSTGRES_USER: ${MLFLOW_DB_USER}
       POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD}
       POSTGRES_DB: mlflow
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD}   # used once by postgres-init/01-airflow.sh
     volumes:
       - postgres:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro   # first start only: creates Airflow's database
 
   minio:
     image: ${MINIO_IMAGE}
