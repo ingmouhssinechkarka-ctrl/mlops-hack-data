@@ -10,11 +10,15 @@ WORKDIR /app
 # 4. Install the Python libraries
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+# Separate step: adding these does not re-download pyspark (450 MB)
+# boto3 = copy files to MinIO, jupyterlab = the analyst's notebook
+RUN pip install --retries 10 boto3
+RUN pip install --retries 10 jupyterlab
 
 # 5. Copy the project code and data
 COPY pipeline/ pipeline/
 COPY data/ data/
-COPY run_pipeline.py register_best_model.py predict_with_approved.py ./
+COPY run_pipeline.py register_best_model.py predict_with_approved.py prepare_deployments.py medallion.py ./
 
 # 6. Command run when the container starts
 CMD ["python", "run_pipeline.py"]

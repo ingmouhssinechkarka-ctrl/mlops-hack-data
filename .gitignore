@@ -28,3 +28,6 @@ mlflow.db*
 
 # Old copy of the project (separate git repo)
 /test3 models mlflow/
+
+# Airflow task logs (output, not code)
+streaming-hack-data/airflow/logs/
