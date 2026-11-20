@@ -14,7 +14,7 @@ RUN pip install -r requirements.txt
 # 5. Copy the project code and data
 COPY pipeline/ pipeline/
 COPY data/ data/
-COPY run_pipeline.py .
+COPY run_pipeline.py register_best_model.py predict_with_approved.py ./
 
 # 6. Command run when the container starts
 CMD ["python", "run_pipeline.py"]
