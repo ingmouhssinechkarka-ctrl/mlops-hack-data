@@ -30,8 +30,11 @@ STREAM_COLUMNS = {
 
 
 def load_parquet(spark: SparkSession, path: str) -> DataFrame:
-    """Reads the attacks the streaming job stored in HDFS, with the CSV's column names."""
+    """Reads attacks stored in HDFS, with the CSV's column names.
+    Bronze (streaming job) has lowercase names; silver already has the CSV names."""
     df = spark.read.parquet(path)
+    if "Session_Connection_Time" in df.columns:          # silver: already renamed
+        return df.select(*SCHEMA.fieldNames())
     return df.select([F.col(src).cast(SCHEMA[dst].dataType).alias(dst)
                       for src, dst in STREAM_COLUMNS.items()])
 

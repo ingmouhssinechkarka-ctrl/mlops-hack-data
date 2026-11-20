@@ -1,5 +1,24 @@
 # Kafka (KRaft, no ZooKeeper) + HDFS (1 namenode, 1 datanode) + Spark (driver container).
 # Settings come from .env. Start everything:  docker compose up -d
+x-airflow-common: &airflow-common
+  image: hack-airflow:v1
+  user: "50000:0"
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD_URL}@postgres:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    # Passed on by the DAG to the trainer container, so it can save models in MinIO
+    MINIO_USER: ${MINIO_USER}
+    MINIO_PASSWORD: ${MINIO_PASSWORD}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - /var/run/docker.sock:/var/run/docker.sock
 services:
 
   kafka:
@@ -74,8 +93,10 @@ services:
       POSTGRES_USER: ${MLFLOW_DB_USER}
       POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD}
       POSTGRES_DB: mlflow
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD}   # used once by postgres-init/01-airflow.sh
     volumes:
       - postgres:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro   # first start only: creates Airflow's database
 
   minio:
     image: ${MINIO_IMAGE}
@@ -117,8 +138,60 @@ services:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: ${MINIO_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_PASSWORD}
-    command: python run_pipeline.py --data hdfs://namenode:9000/hack/attacks --experiment hack-data-stream  
+    command: python run_pipeline.py --data hdfs://namenode:9000/hack/silver/attacks --experiment hack-data-stream   # silver: run medallion.py first
 
+  # The analyst's notebook (the "Jupyter" box of the architecture).
+  # Optional: docker compose --profile analyst up -d jupyter  ->  http://localhost:8888
+  jupyter:
+    image: hack-data-mlops:v1
+    profiles: ["analyst"]
+    depends_on: [mlflow, namenode]
+    mem_limit: 1500m
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_PASSWORD}
+      PYSPARK_SUBMIT_ARGS: --driver-memory 768m pyspark-shell
+      PYTHONPATH: /app        # so notebooks can "from pipeline... import"
+    volumes:
+      - ../notebooks:/app/notebooks
+    ports:
+      - "8888:8888"
+    # No token: fine on your own PC only
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --IdentityProvider.token= --ServerApp.root_dir=/app
+
+  airflow-init:
+    <<: *airflow-common
+    build: ./airflow
+    command: db migrate
+    depends_on: [postgres]
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8081:8080"   # Airflow UI -> http://localhost:8081 (8080 is taken on this PC)
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
 volumes:
   namenode:
   datanode:
